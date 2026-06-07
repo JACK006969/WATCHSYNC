@@ -30,12 +30,38 @@ socket.on('sync_action', (data) => {
     if (data.action === 'play') syncPlay(data.time);
     else if (data.action === 'pause') syncPause(data.time);
 });
+
+// UPDATED: Heartbeat now checks BOTH time and Play/Pause state
 socket.on('heartbeat_sync', (data) => {
     if (!isHost) {
         const currentTime = getCurrentTime();
-        if (currentTime && Math.abs(currentTime - data.time) > 2) seekTo(data.time);
+        const currentIsPlaying = getIsPlaying();
+
+        // 1. Force Play/Pause state if it doesn't match the host
+        if (data.isPlaying !== currentIsPlaying) {
+            if (data.isPlaying) {
+                // Host is playing, guest is paused. Force play.
+                if (currentTime !== null && Math.abs(currentTime - data.time) > 1) {
+                    seekTo(data.time);
+                }
+                // Tiny delay for YouTube API to register the seek before playing
+                setTimeout(() => {
+                    if (currentTorrentFile) document.querySelector('video').play();
+                    else if (ytPlayer) ytPlayer.playVideo();
+                }, 100);
+            } else {
+                // Host is paused, force guest to pause
+                if (currentTorrentFile) document.querySelector('video').pause();
+                else if (ytPlayer) ytPlayer.pauseVideo();
+            }
+        } 
+        // 2. Correct time drift if both are playing
+        else if (data.isPlaying && currentTime !== null && Math.abs(currentTime - data.time) > 1.5) {
+            seekTo(data.time);
+        }
     }
 });
+
 socket.on('host_disconnected', () => {
     alert('The host has disconnected.');
     location.reload();
@@ -63,10 +89,13 @@ function setupWatchScreen(id, host) {
         const shareUrl = `${window.location.origin}/?room=${roomId}`;
         document.getElementById('share-link').classList.remove('hidden');
         document.getElementById('link-text').innerText = shareUrl;
+        
+        // Heartbeat sends time AND play state every 2 seconds
         heartbeatInterval = setInterval(() => {
             const time = getCurrentTime();
-            if (time !== null) socket.emit('heartbeat', { roomId, time });
-        }, 3000);
+            const isPlaying = getIsPlaying();
+            if (time !== null) socket.emit('heartbeat', { roomId, time, isPlaying });
+        }, 2000); 
     } else {
         document.getElementById('source-inputs').classList.add('hidden');
         document.getElementById('status-text').innerText = "Waiting for host...";
@@ -80,7 +109,6 @@ function loadSource() {
     
     if(!id) return alert("Please enter a link or ID");
 
-    // FIX: Automatically extract YouTube ID if they paste a full URL
     if (type === 'youtube') {
         id = extractYouTubeId(id);
         if (!id) return alert("Invalid YouTube URL or ID");
@@ -111,30 +139,20 @@ function loadTorrent(magnetURI, container) {
     document.getElementById('status-text').innerText = "Fetching torrent metadata... Please wait.";
     
     client.add(magnetURI, (torrent) => {
-        // FIX: Only look for MP4 and WEBM. Browsers CANNOT play MKV natively.
         const file = torrent.files.find(f => f.name.endsWith('.mp4') || f.name.endsWith('.webm'));
-        
         if (file) {
             currentTorrentFile = file;
+            // STRICT CONTROL: Only show controls if host
             file.renderTo(container, { autoplay: false, controls: isHost });
             document.getElementById('status-text').innerText = "Video loaded! Press Play.";
         } else {
-            document.getElementById('status-text').innerText = "Error: No .mp4 or .webm file found in this torrent.";
-            console.error("Files in torrent:", torrent.files.map(f => f.name));
+            document.getElementById('status-text').innerText = "Error: No .mp4 or .webm file found.";
         }
-    });
-
-    // Add error logging for torrents
-    client.on('error', (err) => {
-        console.error("WebTorrent Error:", err);
-        document.getElementById('status-text').innerText = "Torrent Error: Check Console (F12)";
     });
 }
 
 function loadYouTube(videoId, container) {
     document.getElementById('status-text').innerText = "Loading YouTube...";
-    
-    // Load YouTube API if not already loaded
     if (!window.YT) {
         const tag = document.createElement('script');
         tag.src = "https://www.youtube.com/iframe_api";
@@ -142,7 +160,6 @@ function loadYouTube(videoId, container) {
         firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
     }
 
-    // Wait for API to be ready
     const checkAPI = setInterval(() => {
         if (window.YT && window.YT.Player) {
             clearInterval(checkAPI);
@@ -156,10 +173,16 @@ function createYTPlayer(videoId, container) {
         height: '100%',
         width: '100%',
         videoId: videoId,
-        playerVars: { 'playsinline': 1, 'controls': isHost ? 1 : 0, 'rel': 0 },
+        playerVars: { 
+            'playsinline': 1, 
+            'controls': isHost ? 1 : 0, 
+            'disablekb': 1, // DISABLES KEYBOARD SHORTCUTS FOR GUESTS
+            'rel': 0,
+            'modestbranding': 1
+        },
         events: {
             'onReady': () => document.getElementById('status-text').innerText = "YouTube loaded! Press Play.",
-            'onError': (e) => document.getElementById('status-text').innerText = "YouTube Error: Video might be restricted."
+            'onError': (e) => document.getElementById('status-text').innerText = "YouTube Error."
         }
     });
 }
@@ -175,7 +198,7 @@ function sendAction(action) {
 function syncPlay(time) {
     if (currentTorrentFile) {
         const video = document.querySelector('#video-container video');
-        if (video) { video.currentTime = time; video.play().catch(e => console.log("Autoplay blocked", e)); }
+        if (video) { video.currentTime = time; video.play(); }
     } else if (ytPlayer && ytPlayer.playVideo) {
         ytPlayer.seekTo(time, true);
         ytPlayer.playVideo();
@@ -211,4 +234,16 @@ function getCurrentTime() {
         return ytPlayer.getCurrentTime();
     }
     return null;
+}
+
+// NEW: Helper to check if the video is currently playing
+function getIsPlaying() {
+    if (currentTorrentFile) {
+        const video = document.querySelector('#video-container video');
+        return video ? !video.paused : false;
+    } else if (ytPlayer && ytPlayer.getPlayerState) {
+        // YouTube API state 1 means PLAYING
+        return ytPlayer.getPlayerState() === 1; 
+    }
+    return false;
 }
