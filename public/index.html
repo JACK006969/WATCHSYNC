@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SyncWatch</title>
+    <!-- ✅ BACKEND URL HERE -->
+    <script src="https://watchsync-4ga1.onrender.com/socket.io/socket.io.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/webtorrent@latest/webtorrent.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; background: #1a1a1a; color: white; text-align: center; padding: 20px; }
+        #app { max-width: 800px; margin: 0 auto; }
+        .hidden { display: none; }
+        input, button, select { padding: 10px; margin: 5px; border-radius: 5px; border: none; font-size: 16px;}
+        input, select { background: #333; color: white; border: 1px solid #555;}
+        button { background: #e50914; color: white; cursor: pointer; font-weight: bold; }
+        button:disabled { background: #555; cursor: not-allowed; }
+        #video-container { margin-top: 20px; background: #000; min-height: 400px; display: flex; align-items: center; justify-content: center; border-radius: 8px; overflow: hidden;}
+        #video-container video, #video-container iframe { width: 100%; max-height: 450px; }
+        #share-link { background: #222; padding: 15px; word-break: break-all; margin: 15px 0; color: #4caf50; border-radius: 5px; font-weight: bold; border: 1px dashed #4caf50;}
+        .controls { margin-top: 15px; }
+        .status { color: #aaa; font-size: 0.9em; margin-top: 10px;}
+    </style>
+</head>
+<body>
+    <div id="app">
+        <h1>🎬 SyncWatch</h1>
+        <div id="lobby">
+            <button onclick="createRoom()">Create New Room (Be Host)</button>
+            <p style="color: #888;">- OR -</p>
+            <input type="text" id="join-room-id" placeholder="Enter Room ID">
+            <button onclick="joinRoom()">Join Room</button>
+        </div>
+        <div id="watch-screen" class="hidden">
+            <h3>Room: <span id="display-room-id"></span> <span id="host-badge" class="hidden" style="color: gold;">(HOST)</span></h3>
+            <div id="share-link" class="hidden">
+                📤 Share this link with friends:<br>
+                <span id="link-text" style="color: white; font-weight: normal;"></span>
+            </div>
+            <div id="source-inputs">
+                <select id="source-type">
+                    <option value="torrent">Torrent (Magnet Link)</option>
+                    <option value="youtube">YouTube (Video ID)</option>
+                </select>
+                <input type="text" id="source-id" placeholder="Magnet link or YouTube ID" style="width: 60%;">
+                <button id="load-source-btn" onclick="loadSource()">Load Video</button>
+            </div>
+            <div id="video-container"></div>
+            <div class="controls">
+                <button id="btn-play" onclick="sendAction('play')" disabled>▶ Play</button>
+                <button id="btn-pause" onclick="sendAction('pause')" disabled>⏸ Pause</button>
+                <p id="status-text" class="status">Waiting for host...</p>
+            </div>
+        </div>
+    </div>
+    <script src="client.js"></script>
+</body>
+</html>
